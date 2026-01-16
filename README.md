@@ -60,3 +60,11 @@ Ralph persists state in `.ralph/`:
 - Claude Code CLI (`claude`)
 - `jq`, `bc`
 - `tmux` (for `--monitor` mode)
+
+## Inspired by other implementations
+
+- https://github.com/frankbria/ralph-claude-code
+- https://github.com/snarktank/ralph
+- https://github.com/ghuntley/how-to-ralph-wiggum
+- https://github.com/iannuttall/ralph
+- https://github.com/vercel-labs/ralph-loop-agent
