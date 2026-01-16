@@ -1,4 +1,4 @@
-# Ralph
+# Ralph Wiggum Loop
 
 An autonomous coding agent loop that repeatedly calls Claude Code until tasks are complete.
 
