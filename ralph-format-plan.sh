@@ -1,12 +1,13 @@
 #!/bin/bash
 # ralph-format-plan.sh - LLM-powered plan formatter for Ralph
-# Usage: ralph-format-plan.sh [--prd|--tasks] <input-plan> [output-file]
+# Usage: ralph-format-plan.sh [--prd|--tasks] [-o output] <input-files...>
 
 set -e
 
 # Parse flags
 FORMAT=""
-POSITIONAL_ARGS=()
+OUTPUT_FILE=""
+INPUT_FILES=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -18,27 +19,30 @@ while [[ $# -gt 0 ]]; do
             FORMAT="tasks"
             shift
             ;;
+        -o|--output)
+            OUTPUT_FILE="$2"
+            shift 2
+            ;;
         -h|--help)
             # Will call usage() after it's defined
             SHOW_HELP=true
             shift
             ;;
         *)
-            POSITIONAL_ARGS+=("$1")
+            INPUT_FILES+=("$1")
             shift
             ;;
     esac
 done
 
-INPUT_FILE="${POSITIONAL_ARGS[0]:-}"
-
-# Set default output based on format (if specified)
-if [[ "$FORMAT" == "prd" ]]; then
-    OUTPUT_FILE="${POSITIONAL_ARGS[1]:-PRD.md}"
-elif [[ "$FORMAT" == "tasks" ]]; then
-    OUTPUT_FILE="${POSITIONAL_ARGS[1]:-TASKS.md}"
-else
-    OUTPUT_FILE="${POSITIONAL_ARGS[1]:-}"  # Will be set after auto-detection
+# Set default output based on format (if specified and not already set)
+if [[ -z "$OUTPUT_FILE" ]]; then
+    if [[ "$FORMAT" == "prd" ]]; then
+        OUTPUT_FILE="PRD.md"
+    elif [[ "$FORMAT" == "tasks" ]]; then
+        OUTPUT_FILE="TASKS.md"
+    fi
+    # If format not specified, OUTPUT_FILE will be set after auto-detection
 fi
 
 usage() {
@@ -46,18 +50,20 @@ usage() {
 ralph-format-plan - Convert plans to Ralph format using LLM
 
 USAGE:
-    ralph-format-plan.sh [OPTIONS] <input-plan> [output-file]
-    cat plan.md | ralph-format-plan.sh - [output-file]
+    ralph-format-plan.sh [OPTIONS] <input-files...>
+    ralph-format-plan.sh [OPTIONS] -o output.md file1.md file2.md ...
+    cat plan.md | ralph-format-plan.sh [OPTIONS] -
     pbpaste | ralph-format-plan.sh --prd -
 
 OPTIONS:
-    --prd         Output PRD format (user stories, non-technical)
-    --tasks       Output Tasks format (technical implementation details)
-    (no flag)     Auto-detect based on input content
+    --prd           Output PRD format (user stories, non-technical)
+    --tasks         Output Tasks format (technical implementation details)
+    -o, --output    Output file path (default: PRD.md or TASKS.md based on format)
+    (no flag)       Auto-detect format based on input content
 
 ARGUMENTS:
-    input-plan    Path to plan file (use - for stdin)
-    output-file   Output path (default: PRD.md or TASKS.md based on format)
+    input-files     One or more input files (use - for stdin)
+                    Multiple files are concatenated in order
 
 FORMAT DIFFERENCES:
     PRD (User Stories):
@@ -79,11 +85,21 @@ SIZING CONSTRAINTS:
     - Touching 1-5 files maximum
 
 EXAMPLES:
-    ralph-format-plan.sh feature-request.md              # Auto-detect
-    ralph-format-plan.sh --prd user-requirements.md      # Force PRD
-    ralph-format-plan.sh --tasks technical-spec.md       # Force Tasks
-    pbpaste | ralph-format-plan.sh -                     # From clipboard
-    echo "Add JWT auth" | ralph-format-plan.sh --prd -   # Inline
+    # Single file (auto-detect format)
+    ralph-format-plan.sh feature-request.md
+
+    # Multiple files combined into one plan
+    ralph-format-plan.sh --tasks spec.md plan.md -o TASKS.md
+
+    # Combine spec and implementation plan
+    ralph-format-plan.sh --tasks specs/spec.md specs/plan.md
+
+    # Force PRD format
+    ralph-format-plan.sh --prd user-requirements.md
+
+    # From stdin
+    pbpaste | ralph-format-plan.sh -
+    cat spec.md plan.md | ralph-format-plan.sh --tasks -
 
 See PRD-TEMPLATE.md and TASKS-TEMPLATE.md for format references.
 EOF
@@ -91,23 +107,32 @@ EOF
 }
 
 [[ "$SHOW_HELP" == true ]] && usage
-[[ -z "$INPUT_FILE" ]] && usage
+[[ ${#INPUT_FILES[@]} -eq 0 ]] && usage
 
 echo "" >&2
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
 echo "🚀 ralph-format-plan" >&2
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
 
-# Read input
+# Read input from one or more files
 echo "📄 Reading input..." >&2
-if [[ "$INPUT_FILE" == "-" ]]; then
-    INPUT_CONTENT=$(cat)
-    echo "   Read from stdin ($(echo "$INPUT_CONTENT" | wc -c | tr -d ' ') bytes)" >&2
-else
-    [[ ! -f "$INPUT_FILE" ]] && echo "Error: File not found: $INPUT_FILE" >&2 && exit 1
-    INPUT_CONTENT=$(cat "$INPUT_FILE")
-    echo "   Read from: $INPUT_FILE ($(echo "$INPUT_CONTENT" | wc -c | tr -d ' ') bytes)" >&2
-fi
+INPUT_CONTENT=""
+
+for INPUT_FILE in "${INPUT_FILES[@]}"; do
+    if [[ "$INPUT_FILE" == "-" ]]; then
+        STDIN_CONTENT=$(cat)
+        INPUT_CONTENT+="$STDIN_CONTENT"
+        echo "   Read from stdin ($(echo "$STDIN_CONTENT" | wc -c | tr -d ' ') bytes)" >&2
+    else
+        [[ ! -f "$INPUT_FILE" ]] && echo "Error: File not found: $INPUT_FILE" >&2 && exit 1
+        FILE_CONTENT=$(cat "$INPUT_FILE")
+        INPUT_CONTENT+="$FILE_CONTENT"
+        INPUT_CONTENT+=$'\n\n'  # Add separator between files
+        echo "   Read from: $INPUT_FILE ($(echo "$FILE_CONTENT" | wc -c | tr -d ' ') bytes)" >&2
+    fi
+done
+
+echo "   Total input: $(echo "$INPUT_CONTENT" | wc -c | tr -d ' ') bytes from ${#INPUT_FILES[@]} file(s)" >&2
 
 # Check for claude CLI
 echo "🔍 Checking for claude CLI..." >&2
