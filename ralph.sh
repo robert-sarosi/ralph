@@ -31,7 +31,7 @@ RATE_LIMIT=${RATE_LIMIT:-100}
 PROMPT_FILE=${PROMPT_FILE:-"PROMPT.md"}
 PLAN_FILE=""  # Required, set via first positional argument
 TIMEOUT_MINUTES=${TIMEOUT_MINUTES:-15}
-MODEL=${MODEL:-"claude-opus-4-5-20251101"}
+MODEL=${MODEL:-"opus"}
 VERBOSE=${VERBOSE:-false}
 DRY_RUN=${DRY_RUN:-false}
 MONITOR_MODE=${MONITOR_MODE:-false}
@@ -1157,6 +1157,12 @@ Please read $PLAN_FILE and proceed with the FIRST unchecked task.
 Remember to output the RALPH_STATUS block at the end of your response.
 "
 
+    # Write prompt to temp file to avoid shell escaping issues with special characters
+    # (backticks, $variables, etc. in markdown can cause shell interpretation problems)
+    local prompt_tmpfile="/tmp/claude/ralph_prompt_$$.txt"
+    mkdir -p /tmp/claude
+    printf '%s' "$full_prompt" > "$prompt_tmpfile"
+
     # Execute Claude Code with timeout
     local timeout_seconds=$(( TIMEOUT_MINUTES * 60 ))
     local exit_code=0
@@ -1164,8 +1170,11 @@ Remember to output the RALPH_STATUS block at the end of your response.
     log DEBUG "Executing Claude Code (timeout: ${TIMEOUT_MINUTES}m)..."
 
     # Run Claude in YOLO mode (--dangerously-skip-permissions) for autonomous operation
-    # Output JSON to file for debugging/token tracking, also save to RESPONSE_FILE
-    if timeout "$timeout_seconds" claude -p "$full_prompt" --model "$MODEL" --dangerously-skip-permissions --verbose --output-format stream-json 2>&1 | tee "$json_log_file" > "$RESPONSE_FILE"; then
+    # Use process substitution to provide stdin - this ensures the fd is properly closed
+    # after reading, preventing subagent stdin inheritance issues
+    # Save JSON to log file, suppress stdout so it doesn't get captured by command substitution
+    # (tee's stdout was causing JSON to leak into parsed_output, breaking eval)
+    if timeout --foreground "$timeout_seconds" claude -p - --model "$MODEL" --dangerously-skip-permissions --verbose --output-format stream-json < <(cat "$prompt_tmpfile") 2>&1 | tee "$json_log_file" > /dev/null; then
         exit_code=0
     else
         exit_code=$?
@@ -1173,6 +1182,12 @@ Remember to output the RALPH_STATUS block at the end of your response.
             log WARN "Claude call timed out after $TIMEOUT_MINUTES minutes"
         fi
     fi
+
+    # Copy to RESPONSE_FILE for parsing (avoids tee which can cause buffering issues)
+    cp "$json_log_file" "$RESPONSE_FILE" 2>/dev/null || true
+
+    # Cleanup temp file
+    rm -f "$prompt_tmpfile"
 
     # Extract plain text from JSON for readable log file
     if [[ -f "$json_log_file" ]]; then
